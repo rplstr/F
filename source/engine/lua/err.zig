@@ -2,64 +2,51 @@ const std = @import("std");
 const luajit = @import("luajit");
 const tty = std.io.tty;
 
-pub const GlobalErrorContext = struct {
-    last_zig_stack: ?std.builtin.StackTrace = null,
-};
+/// A wrapper around lua_pcall.
+/// If the call fails, it returns an error containing the formatted message.
+pub fn protectedCall(L: *luajit.lua_State, nargs: c_int, nresults: c_int) !void {
+    // The message handler is pushed onto the stack before the function to be called.
+    const message_handler_index = luajit.lua_gettop(L) - nargs;
+    luajit.lua_pushcfunction(L, messageHandler);
+    luajit.lua_insert(L, message_handler_index);
 
-pub var error_context: GlobalErrorContext = .{};
-threadlocal var stack_buffer: [128]usize = undefined;
+    const result = luajit.lua_pcall(L, nargs, nresults, message_handler_index);
 
-/// A wrapper around lua_pcall that uses `panicHandler`.
-pub fn protectedCall(L: *luajit.lua_State) bool {
-    var stack_trace = std.builtin.StackTrace{
-        .instruction_addresses = &stack_buffer,
-        .index = 0,
-    };
-    std.debug.captureStackTrace(null, &stack_trace);
-    error_context.last_zig_stack = stack_trace;
+    luajit.lua_remove(L, message_handler_index);
 
-    const original_stack_top = luajit.lua_gettop(L);
-    luajit.lua_pushcfunction(L, panicHandler);
-    luajit.lua_insert(L, original_stack_top);
+    if (result == luajit.LUA_OK) {
+        return;
+    }
 
-    const script_index = original_stack_top + 1;
-    const result = luajit.lua_pcall(L, luajit.lua_gettop(L) - script_index, 0, original_stack_top);
+    // On error, the message handler will have left a formatted string on the stack.
+    defer luajit.lua_pop(L, 1); // Stack should be clean after we're done.
 
-    luajit.lua_remove(L, original_stack_top);
+    const error_msg_ptr = luajit.lua_tolstring(L, -1, null);
+    const error_message = if (error_msg_ptr) |ptr| std.mem.sliceTo(ptr, 0) else "unknown lua error";
 
-    return result == 0;
-}
-
-/// This is the function that Lua calls when a panic occurs.
-pub fn panicHandler(L_opt: ?*luajit.lua_State) callconv(.c) c_int {
-    const L = L_opt orelse return 1;
     const stderr = std.io.getStdErr();
-    const tty_config = tty.detectConfig(stderr);
+    const tty_config = std.io.tty.detectConfig(stderr);
     const writer = stderr.writer();
 
     tty_config.setColor(writer, .red) catch {};
-    writer.print("thread {any} panic:\n", .{std.Thread.getCurrentId()}) catch {};
+    writer.writeAll("looks like an error occured!\nyou can continue the game but it is not recommended as the application could be in an unstable state\n") catch {};
+    writer.print("thread {any} lua runtime error:\n", .{std.Thread.getCurrentId()}) catch {};
     tty_config.setColor(writer, .reset) catch {};
-
-    luajit.lua_getglobal(L, "debug");
-    luajit.lua_getfield(L, -1, "traceback");
-    luajit.lua_pushvalue(L, -3);
-    luajit.lua_pushinteger(L, 2);
-    luajit.lua_call(L, 2, 1);
-
-    var trace_len: usize = 0;
-    const trace_str = luajit.lua_tolstring(L, -1, &trace_len);
-
-    if (trace_str) |s| {
-        writer.writeAll(s[0..trace_len]) catch {};
-    }
+    writer.writeAll(error_message) catch {};
     writer.writeAll("\n") catch {};
 
-    if (error_context.last_zig_stack) |stack| {
-        writer.writeAll("\n") catch {};
+    return error.LuaScriptError;
+}
 
-        std.debug.dumpStackTrace(stack);
-    }
+fn messageHandler(L_opt: ?*luajit.lua_State) callconv(.c) c_int {
+    const L = L_opt orelse return 1;
+
+    // We expect the original error object to be on the top of the stack.
+    luajit.lua_getglobal(L, "debug");
+    luajit.lua_getfield(L, -1, "traceback");
+    luajit.lua_pushvalue(L, -3); // Push the original error object.
+    luajit.lua_pushinteger(L, 2); // Start traceback at level 2 (skip this C func).
+    luajit.lua_call(L, 2, 1); // This call replaces the error object with the formatted traceback string.
 
     return 1;
 }

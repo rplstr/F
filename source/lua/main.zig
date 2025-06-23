@@ -20,21 +20,14 @@ pub fn main() !void {
 
     lua.interfaces.log.register(L.?, &context);
 
-    const lua_script =
-        \\local logger = f.log.scoped("test")
-        \\logger:info("this will work")
-        \\
-        \\local a = 1
-        \\local b = nil
-        \\
-        \\local c = a + b
-    ;
-
-    if (luajit.luaL_loadstring(L.?, lua_script) != 0) {
-        return;
+    if (luajit.luaL_loadfile(L, "source/lua/main.lua") != 0) {
+        const error_msg_ptr = luajit.lua_tolstring(L, -1, null);
+        const error_msg = if (error_msg_ptr) |ptr| std.mem.sliceTo(ptr, 0) else "unknown error";
+        std.log.err("failed to load script: {s}", .{error_msg});
+        luajit.lua_pop(L, 1);
+    } else {
+        err.protectedCall(L.?, 0, 0) catch {};
     }
 
-    if (!err.protectedCall(L.?)) {
-        return;
-    }
+    std.log.info("done", .{});
 }
