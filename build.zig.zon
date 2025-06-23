@@ -1,0 +1,16 @@
+.{
+    .name = .F,
+    .version = "0.0.1",
+    .fingerprint = 0x4dbd0b28f4f2e567,
+    .dependencies = .{
+        .luajit_build = .{
+            .url = "git+https://github.com/sackosoft/zig-luajit-build#eeae54c83591f4376f1adea00a03e1497aea2425",
+            .hash = "12208411c3f03fc9d19c348b4b7101cae47cbb965601706ad3c3c7a27b7b7eda4f2e",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "source",
+        "build.zig.zon",
+    },
+}
