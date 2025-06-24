@@ -1,81 +1,105 @@
-//! A polling-based file watcher that monitors a file for modifications.
-//!
-//! The watcher operates on a separate thread. To release the
-//! watcher thread and associated resources, `stop()` must be called.
+//! Polling file watcher.
 const std = @import("std");
+
+const log = std.log.scoped(.@"file watcher");
+
+pub const Callback = fn (watcher: *FileWatcher, path: []const u8) void;
+
+pub const StartConfig = struct {
+    allocator: ?std.mem.Allocator = null,
+    /// Poll interval in milliseconds.
+    poll_interval_ms: u64 = 500,
+    /// Minimum delay between two callback invocations (milliseconds).
+    debounce_ms: u64 = 0,
+    /// Stack size for the watcher thread.
+    stack_size: usize = 64 * 1024,
+};
 
 const FileWatcher = @This();
 
-handle: std.Thread,
-stop_signal: std.atomic.Value(bool),
-context: WatchContext,
+allocator: std.mem.Allocator,
+path: []u8,
+handle: ?std.Thread = null,
+stop_flag: std.atomic.Value(bool) = .init(false),
+callback: Callback,
+poll_interval_ns: u64,
+debounce_ns: u64,
 
-const WatchContext = struct {
-    path_buffer: [std.fs.max_path_bytes]u8,
-    path_len: usize,
-    callback: fn () void,
-    poll_interval_ns: u64,
-};
-
-pub const StartOptions = struct {
-    poll_interval_ms: u64 = 500,
-};
-
-/// Spawns a new thread to watch a file for modifications.
-///
-/// The `path` is copied into an internal buffer. The `callback` is invoked
-/// on the watcher's thread whenever the file's modification time changes.
+/// Starts the watcher. The struct must outlive the spawned thread.
 pub fn start(
     self: *FileWatcher,
     path: []const u8,
-    callback: fn () void,
-    options: StartOptions,
+    callback: Callback,
+    options: StartConfig,
 ) !void {
-    if (path.len >= self.context.path_buffer.len) {
-        return error.PathTooLong;
-    }
+    if (self.handle != null) return error.AlreadyStarted;
 
-    self.stop_signal.store(false, .seq_cst);
+    const gpa = options.allocator orelse std.heap.page_allocator;
+    const path_copy = try gpa.alloc(u8, path.len);
+    @memcpy(path_copy, path);
 
-    @memcpy(self.context.path_buffer[0..path.len], path);
+    self.allocator = gpa;
+    self.path = path_copy;
+    self.callback = callback;
+    self.poll_interval_ns = options.poll_interval_ms * std.time.ns_per_ms;
+    self.debounce_ns = options.debounce_ms * std.time.ns_per_ms;
+    self.stop_flag.store(false, .seq_cst);
 
-    self.context.path_len = path.len;
-    self.context.callback = callback;
-    self.context.poll_interval_ns = options.poll_interval_ms * std.time.ns_per_ms;
-
-    self.handle = try .spawn(.{}, watchLoop, .{self});
+    self.handle = try .spawn(
+        .{ .stack_size = options.stack_size },
+        watchLoop,
+        .{self},
+    );
+    log.info("watching on {s} with interval {d}ms", .{ path, options.poll_interval_ms });
 }
 
-/// Signals the watcher thread to stop and waits for it to terminate.
-/// This function blocks until the thread has been fully joined.
+/// Stops the watcher and frees associated resources. Blocks until the thread
+/// terminates.
 pub fn stop(self: *FileWatcher) void {
-    self.stop_signal.store(true, .seq_cst);
-    self.handle.join();
+    if (self.handle) |t| {
+        log.info("stopping watcher for '{s}'", .{self.path});
+        self.stop_flag.store(true, .seq_cst);
+        t.join();
+        self.allocator.free(self.path);
+        self.path = &[_]u8{};
+        self.handle = null;
+    }
 }
 
-fn watchLoop(watcher: *FileWatcher) void {
-    const path = watcher.context.path_buffer[0..watcher.context.path_len];
-    const callback = watcher.context.callback;
-    const poll_interval_ns = watcher.context.poll_interval_ns;
+/// Returns `true` if the watcher thread is currently running.
+pub fn isRunning(self: *const FileWatcher) bool {
+    return self.handle != null;
+}
 
-    var last_mod_time: i64 = -1;
+fn watchLoop(self: *FileWatcher) void {
+    var file = std.fs.cwd().openFile(self.path, .{ .mode = .read_only }) catch |err| {
+        log.err("failed to open '{s}': {s}", .{ self.path, @errorName(err) });
+        return;
+    };
+    defer file.close();
 
-    while (!watcher.stop_signal.load(.seq_cst)) {
-        const stat = std.fs.cwd().statFile(path) catch |err| {
-            if (err != error.FileNotFound) {
-                std.log.err("failed to stat '{s}': {s}", .{ path, @errorName(err) });
-            }
-            std.Thread.sleep(poll_interval_ns);
-            continue;
+    var last_stat = file.stat() catch std.fs.File.Stat{ .mtime = 0, .size = 0, .atime = 0, .ctime = 0, .mode = 0 };
+    var last_cb_ts: u64 = 0;
+    var timer = std.time.Timer.start() catch unreachable;
+
+    while (!self.stop_flag.load(.seq_cst)) {
+        const stat = file.stat() catch |err| {
+            log.err("stat failed for '{s}': {s}", .{ self.path, @errorName(err) });
+            break;
         };
 
-        if (last_mod_time < 0) {
-            last_mod_time = stat.mtime;
-        } else if (stat.mtime > last_mod_time) {
-            last_mod_time = stat.mtime;
-            callback();
+        if (stat.mtime > last_stat.mtime) {
+            const now = std.time.nanoTimestamp();
+            if (self.debounce_ns == 0 or now - last_cb_ts >= self.debounce_ns) {
+                last_cb_ts = now;
+                self.callback(self, self.path);
+            }
+            last_stat = stat;
         }
 
-        std.Thread.sleep(poll_interval_ns);
+        const elapsed = timer.lap();
+        if (elapsed < self.poll_interval_ns) {
+            std.Thread.sleep(self.poll_interval_ns - elapsed);
+        }
     }
 }
