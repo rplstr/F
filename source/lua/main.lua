@@ -1,12 +1,16 @@
-local logger = f.log.new("test")
-logger:info("this will work")
+package.path = "source/lua/?.lua;" .. package.path
 
-local a = 1
-local b = nil
+local event = require "event"
+local logger = f.log.new("demo")
 
-local c = a + b
+logger:info("hi")
 
-logger:info(c)
+event.on(f.event.Kind.key_down, function(ev)
+    if ev.p0 == f.input.Key.f then
+        logger:info("F pressed")
+    end
+end)
 
-
-    
+function update()
+    event.dispatch()
+end

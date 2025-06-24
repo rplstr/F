@@ -37,9 +37,24 @@ pub const Class = struct {
     methods: []const Function,
 };
 
+/// Describes a single compile-time constant inside an enum.
+pub const EnumField = struct {
+    name: []const u8,
+    value: i64,
+};
+
+/// Representation of a Zig enum exported to Lua. Generated as
+/// `---@alias name integer` followed by an `---@enum` block so EmmyLua / LLS recognize it.
+pub const Enum = struct {
+    /// Fully-qualified Lua name, e.g. "f.input.Key"
+    name: []const u8,
+    fields: []const EnumField,
+};
+
 const max_modules = 32;
 const max_classes = 32;
 const max_functions_per_item = 64;
+const max_enums = 64;
 
 pub const Registry = @This();
 
@@ -49,12 +64,17 @@ registered_modules: u32 = 0,
 api_classes: [max_classes]*const Class = undefined,
 registered_classes: u32 = 0,
 
+api_enums: [max_enums]*const Enum = undefined,
+registered_enums: u32 = 0,
+
 pub fn init() Registry {
     return .{
         .api_modules = [_]*const Module{undefined} ** max_modules,
         .registered_modules = 0,
         .api_classes = [_]*const Class{undefined} ** max_classes,
         .registered_classes = 0,
+        .api_enums = [_]*const Enum{undefined} ** max_enums,
+        .registered_enums = 0,
     };
 }
 
@@ -113,8 +133,16 @@ pub fn registerClass(self: *Registry, L: *luajit.lua_State, class: *const Class)
     luajit.lua_pop(L, 1);
 }
 
-/// Iterates through all modules and classes added via `registerModule`
-/// and `registerClass` and writes their definitions to `.lua` files in the
+/// Adds an enum description for documentation generation.
+/// Does not touch the Lua state at runtime.
+pub fn registerEnum(self: *Registry, en: *const Enum) void {
+    std.debug.assert(self.registered_enums < max_enums);
+    self.api_enums[self.registered_enums] = en;
+    self.registered_enums += 1;
+}
+
+/// Iterates through all modules, classes, and enums added via the registry
+/// `registerClass`, and `registerEnum` and writes their definitions to `.lua` files in the
 /// target directory.
 pub fn generate(self: *const Registry, allocator: std.mem.Allocator, dir_path: []const u8) !void {
     log.debug("┌─", .{});
@@ -149,6 +177,15 @@ pub fn generate(self: *const Registry, allocator: std.mem.Allocator, dir_path: [
             const class = self.api_classes[j];
             if (std.mem.startsWith(u8, class.name, module_prefix)) {
                 try writeClass(allocator, writer, class);
+            }
+        }
+
+        // Enums
+        var k: u32 = 0;
+        while (k < self.registered_enums) : (k += 1) {
+            const en = self.api_enums[k];
+            if (std.mem.startsWith(u8, en.name, module_prefix)) {
+                try writeEnum(writer, en);
             }
         }
 
@@ -238,4 +275,15 @@ fn writeFunctionDocumentation(writer: anytype, func: *const Function, fqn: []con
     }
 
     try writer.print("function {s}({s}) end\n\n", .{ fqn, param_list });
+}
+
+fn writeEnum(writer: anytype, e: *const Enum) !void {
+    log.debug("│  └─ enum {s}", .{e.name});
+    try writer.print("---@alias {s} integer\n", .{e.name});
+    try writer.print("---@enum {s}\n{s} = {{\n", .{ e.name, e.name });
+    for (e.fields) |f| {
+        log.debug("│  │  └─ {s}", .{f.name});
+        try writer.print("    {s} = {d},\n", .{ f.name, f.value });
+    }
+    try writer.writeAll("}\n\n");
 }

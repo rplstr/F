@@ -4,6 +4,7 @@ const engine = @import("f");
 
 const lua = engine.lua;
 const err = lua.err;
+const input = engine.input;
 
 const Context = lua.Context;
 
@@ -18,8 +19,10 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var context = Context.init(allocator);
-    defer context.deinit();
+    var log_context = Context.init(allocator);
+    defer log_context.deinit();
+
+    var input_context = input.Context{};
 
     const L = luajit.luaL_newstate();
     defer luajit.lua_close(L);
@@ -27,9 +30,19 @@ pub fn main() !void {
 
     var registry = lua.registry.init();
 
-    lua.interfaces.log.register(&registry, L.?, &context);
+    lua.interfaces.log.register(&registry, L.?, &log_context);
+    lua.interfaces.input.register(&registry, L.?, &input_context);
+    lua.interfaces.event.register(&registry, L.?);
 
     try lua.registry.generate(&registry, allocator, "meta");
+
+    const window = try engine.Window.open(.{
+        .title = "Hello World",
+        .width = 800,
+        .height = 600,
+        .flags = engine.Window.OpenFlags.mask(.{ .visible, .decorated, .border, .resizable }),
+    });
+    defer engine.Window.close(window) catch {};
 
     if (luajit.luaL_loadfile(L, "source/lua/main.lua") != 0) {
         const error_msg_ptr = luajit.lua_tolstring(L, -1, null);
@@ -40,5 +53,31 @@ pub fn main() !void {
         err.protectedCall(L.?, 0, 0) catch {};
     }
 
-    std.log.info("done", .{});
+    var queue: engine.event.Queue = .{};
+
+    while (true) update(window, &queue, &input_context, L.?) catch |e| {
+        if (e == error.Quit) break;
+    };
+}
+
+fn update(window: engine.Window.Handle, queue: *engine.event.Queue, input_context: *engine.input.Context, L: *luajit.lua_State) !void {
+    engine.Window.pump(window, queue);
+
+    while (queue.pop()) |ev| {
+        input_context.handleEvent(ev);
+
+        switch (ev.id) {
+            .quit => return error.Quit,
+            else => {},
+        }
+    }
+
+    _ = luajit.lua_getglobal(L, "update");
+    if (luajit.lua_isfunction(L, -1) != false) {
+        err.protectedCall(L, 0, 0) catch {};
+    } else {
+        luajit.lua_pop(L, 1);
+    }
+
+    std.Thread.sleep(16 * std.time.ns_per_ms);
 }
