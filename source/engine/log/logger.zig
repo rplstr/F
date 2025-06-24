@@ -30,7 +30,7 @@ pub fn createInPlace(
     };
 }
 
-fn logFn(
+pub fn logFn(
     comptime level: std.log.Level,
     scope: []const u8,
     format: []const u8,
@@ -67,4 +67,18 @@ fn logFn(
     writer.print(": ", .{}) catch {};
     writer.writeAll(format) catch {};
     writer.print("\n", .{}) catch {};
+}
+
+/// Used for `std_options`.
+pub fn stdLogFn(
+    comptime level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, format, args) catch {
+        return;
+    };
+    logFn(level, @tagName(scope), msg);
 }
