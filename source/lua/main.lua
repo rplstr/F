@@ -1,4 +1,4 @@
-local logger = f.log.scoped("test")
+local logger = f.log.new("test")
 logger:info("this will work")
 
 local a = 1

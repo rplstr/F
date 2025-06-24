@@ -1,10 +1,17 @@
 const std = @import("std");
 const luajit = @import("luajit");
 const engine = @import("f");
+
 const lua = engine.lua;
+const err = lua.err;
+
 const Context = lua.Context;
 
-const err = lua.err;
+const logFn = engine.logger.stdLogFn;
+
+pub const std_options: std.Options = .{
+    .logFn = logFn,
+};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -18,7 +25,11 @@ pub fn main() !void {
     defer luajit.lua_close(L);
     luajit.luaL_openlibs(L);
 
-    lua.interfaces.log.register(L.?, &context);
+    var registry = lua.registry.init();
+
+    lua.interfaces.log.register(&registry, L.?, &context);
+
+    try lua.registry.generate(&registry, allocator, "meta");
 
     if (luajit.luaL_loadfile(L, "source/lua/main.lua") != 0) {
         const error_msg_ptr = luajit.lua_tolstring(L, -1, null);
