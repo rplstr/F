@@ -40,4 +40,13 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run lua");
     run_step.dependOn(&run_cmd.step);
+
+    const clean_step = b.step("clean", "Remove build artifacts");
+    const rm_zig_out = b.addRemoveDirTree(b.path("zig-out"));
+    const rm_meta = b.addRemoveDirTree(b.path("meta"));
+    const rm_cache = b.addRemoveDirTree(b.path(".zig-cache"));
+
+    clean_step.dependOn(&rm_meta.step);
+    clean_step.dependOn(&rm_zig_out.step);
+    clean_step.dependOn(&rm_cache.step);
 }
