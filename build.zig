@@ -16,6 +16,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     engine.addImport("luajit", luajit_module);
+    if (target.result.os.tag == .linux) {
+        engine.linkSystemLibrary("X11", .{});
+    }
 
     const lua_api = b.addModule("runner", .{
         .root_source_file = b.path("source/lua/main.zig"),
