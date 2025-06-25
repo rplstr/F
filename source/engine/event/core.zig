@@ -17,6 +17,10 @@ pub const EventKind = enum(u8) {
     button_down,
     button_up,
     mouse_move,
+    component_add,
+    component_set,
+    component_remove,
+    entity_modified,
 };
 
 pub const Payload = struct {

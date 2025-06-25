@@ -10,7 +10,6 @@ const Context = input.Context;
 
 var ctx: *Context = undefined;
 
-/// Registers the `f.input` module and its constant tables.
 pub fn register(r: *registry.Registry, L: *luajit.lua_State, context_handle: *Context) void {
     ctx = context_handle;
     r.registerEnum(&key_enum);
@@ -19,7 +18,6 @@ pub fn register(r: *registry.Registry, L: *luajit.lua_State, context_handle: *Co
     buildConstantTables(L);
 }
 
-/// Returns `true` when the specified key is down.
 fn isKeyDown(L: ?*luajit.lua_State) callconv(.c) c_int {
     const key_code = @as(u16, @intCast(luajit.luaL_checkinteger(L.?, 1)));
     const key = @as(Key, @enumFromInt(key_code));
@@ -27,7 +25,6 @@ fn isKeyDown(L: ?*luajit.lua_State) callconv(.c) c_int {
     return 1;
 }
 
-/// Returns `true` when the specified mouse button is pressed.
 fn isButtonDown(L: ?*luajit.lua_State) callconv(.c) c_int {
     const btn_code = @as(u8, @intCast(luajit.luaL_checkinteger(L.?, 1)));
     const btn = @as(Button, @enumFromInt(btn_code));
@@ -35,7 +32,6 @@ fn isButtonDown(L: ?*luajit.lua_State) callconv(.c) c_int {
     return 1;
 }
 
-/// Returns the current mouse cursor position as `(x, y)`.
 fn mousePosition(L: ?*luajit.lua_State) callconv(.c) c_int {
     luajit.lua_pushinteger(L.?, ctx.mouse_x);
     luajit.lua_pushinteger(L.?, ctx.mouse_y);

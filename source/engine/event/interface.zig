@@ -3,8 +3,6 @@ const luajit = @import("luajit");
 const registry = @import("../lua/registry.zig");
 const core = @import("core.zig");
 
-/// Registers the `f.event` module and the `EventKind` enum.
-/// Must be called once during engine boot after Lua VM is ready.
 pub fn register(r: *registry.Registry, L: *luajit.lua_State) void {
     r.registerEnum(&event_kind_enum);
     r.registerModule(L, &event_module);

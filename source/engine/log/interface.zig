@@ -9,7 +9,6 @@ var context: *Context = undefined;
 
 const logger_class_name = "f.log.Logger";
 
-/// Registers the log module and Logger class with the Lua registry.
 pub fn register(r: *registry.Registry, L: *luajit.lua_State, ctx: *Context) void {
     context = ctx;
     r.registerModule(L, &log_module);
@@ -27,8 +26,6 @@ fn getLogger(L: *luajit.lua_State) *log.Logger {
     return @as(*log.Logger, @alignCast(@ptrCast(ptr)));
 }
 
-/// Log an info message. This log level is intended to be used for
-/// general messages about the state.
 fn loggerInfo(L: ?*luajit.lua_State) callconv(.c) c_int {
     const logger = getLogger(L.?);
     const message = checkString(L.?, 2);
@@ -36,9 +33,6 @@ fn loggerInfo(L: ?*luajit.lua_State) callconv(.c) c_int {
     return 0;
 }
 
-/// Log a warning message. This log level is intended to be used if
-/// it is uncertain whether something has gone wrong or not, but the
-/// circumstances would be worth investigating.
 fn loggerWarn(L: ?*luajit.lua_State) callconv(.c) c_int {
     const logger = getLogger(L.?);
     const message = checkString(L.?, 2);
@@ -46,8 +40,6 @@ fn loggerWarn(L: ?*luajit.lua_State) callconv(.c) c_int {
     return 0;
 }
 
-/// Log an error message. This log level is intended to be used
-/// when something has gone wrong. This might be recoverable or not.
 fn loggerErr(L: ?*luajit.lua_State) callconv(.c) c_int {
     const logger = getLogger(L.?);
     const message = checkString(L.?, 2);

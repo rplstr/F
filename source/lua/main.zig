@@ -5,8 +5,24 @@ const engine = @import("f");
 const lua = engine.lua;
 const err = lua.err;
 const input = engine.input;
+const ecs = engine.ecs;
 
 const Context = lua.Context;
+
+pub const Position = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+};
+
+const World = engine.ecs.World(.{
+    .cap = 1024,
+    .max_obs = 64,
+    .max_sys = 256,
+    .max_cmd = 4096,
+    .stage_bytes = 16 * 1024,
+    .max_comp = 128,
+    .arena_bytes = 128 * 1024,
+});
 
 const logFn = engine.logger.stdLogFn;
 
@@ -22,6 +38,9 @@ pub fn main() !void {
     var log_context = Context.init(allocator);
     defer log_context.deinit();
 
+    var world: World = .{};
+    world.init();
+
     var input_context = input.Context{};
 
     const L = luajit.luaL_newstate();
@@ -29,7 +48,11 @@ pub fn main() !void {
     luajit.luaL_openlibs(L);
 
     var registry = lua.registry.init();
+    const EcsInterface = lua.interfaces.ecs.interface(*World);
 
+    _ = EcsInterface.registerComponent(Position);
+
+    EcsInterface.register(&registry, L.?, &world);
     lua.interfaces.log.register(&registry, L.?, &log_context);
     lua.interfaces.input.register(&registry, L.?, &input_context);
     lua.interfaces.event.register(&registry, L.?);
@@ -55,12 +78,12 @@ pub fn main() !void {
 
     var queue: engine.event.Queue = .{};
 
-    while (true) update(window, &queue, &input_context, L.?) catch |e| {
+    while (true) update(window, &queue, &input_context, &world, L.?) catch |e| {
         if (e == error.Quit) break;
     };
 }
 
-fn update(window: engine.Window.Handle, queue: *engine.event.Queue, input_context: *engine.input.Context, L: *luajit.lua_State) !void {
+fn update(window: engine.Window.Handle, queue: *engine.event.Queue, input_context: *engine.input.Context, world: *World, L: *luajit.lua_State) !void {
     engine.Window.pump(window, queue);
 
     while (queue.pop()) |ev| {
@@ -78,6 +101,8 @@ fn update(window: engine.Window.Handle, queue: *engine.event.Queue, input_contex
     } else {
         luajit.lua_pop(L, 1);
     }
+
+    world.runFrame(0.016);
 
     std.Thread.sleep(16 * std.time.ns_per_ms);
 }
