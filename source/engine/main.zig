@@ -3,6 +3,7 @@ pub const lua = @import("lua.zig");
 pub const event = @import("window/event.zig");
 pub const input = @import("input/input.zig");
 pub const ecs = @import("ecs/world.zig");
+pub const job = @import("parallelization/JobSystem.zig");
 
 pub const Window = @import("window/Window.zig");
 pub const FileWatcher = @import("FileWatcher.zig");

@@ -13,6 +13,9 @@ const CommandBuffer = @import("command.zig").CommandBuffer;
 const SystemScheduler = @import("SystemScheduler.zig").SystemScheduler;
 const ComponentStore = @import("ComponentStore.zig").ComponentStore;
 const ev = @import("../event/core.zig");
+const JobSystem = @import("../parallelization/JobSystem.zig");
+const JobHandle = @import("../parallelization/job/Handle.zig");
+const Job = @import("../parallelization/job/Job.zig");
 
 pub const Error = error{ OutOfSpace, InvalidHandle };
 
@@ -78,7 +81,39 @@ pub fn World(comptime Cfg: WorldConfig) type {
 
         /// Run one simulation frame: execute all systems and flush deferred commands.
         pub fn runFrame(self: *Self, dt: f32) void {
-            self.systems.run(self, dt);
+            const js = getJobSystem();
+
+            var idx: usize = 0;
+            while (idx < self.systems.sys_len) {
+                const ord = self.systems.sys_ord[idx];
+
+                var handles: [Cfg.max_sys]JobHandle = undefined;
+                var h_count: usize = 0;
+
+                while (idx < self.systems.sys_len and self.systems.sys_ord[idx] == ord) : (idx += 1) {
+                    const sys_fn = self.systems.sys_fn[idx];
+
+                    const ctx = SystemJobCtx{
+                        .world = self,
+                        .func = sys_fn,
+                        .dt = dt,
+                    };
+
+                    const data = @as([*]const u8, @ptrCast(&ctx))[0..@sizeOf(SystemJobCtx)];
+                    if (js.createJob(systemJobTask, JobHandle.invalid, data)) |h| {
+                        js.run(h);
+                        handles[h_count] = h;
+                        h_count += 1;
+                    } else {
+                        sys_fn(self, dt);
+                    }
+                }
+
+                var wi: usize = 0;
+                while (wi < h_count) : (wi += 1) {
+                    js.wait(handles[wi]);
+                }
+            }
 
             self.flushCommands();
         }
@@ -197,6 +232,17 @@ pub fn World(comptime Cfg: WorldConfig) type {
         fn typeId(comptime T: type) u64 {
             return Fnv64.hash(@typeName(T));
         }
+
+        const SystemJobCtx = struct {
+            world: *Self,
+            func: *const fn (*Self, f32) void,
+            dt: f32,
+        };
+
+        fn systemJobTask(_: *anyopaque, current_job: *Job) void {
+            const ctx = std.mem.bytesToValue(SystemJobCtx, current_job.data[0..@sizeOf(SystemJobCtx)]);
+            ctx.func(ctx.world, ctx.dt);
+        }
     };
 }
 
@@ -305,4 +351,13 @@ test "system execution order" {
     try std.testing.expectEqual(@as(u8, 1), sys_exec_order[0]);
     try std.testing.expectEqual(@as(u8, 2), sys_exec_order[1]);
     try std.testing.expectEqual(@as(u8, 2), sys_exec_idx);
+}
+
+var job_system: ?*JobSystem = null;
+
+fn getJobSystem() *JobSystem {
+    if (job_system == null) {
+        job_system = JobSystem.init(std.heap.c_allocator) catch @panic("Failed to init JobSystem");
+    }
+    return job_system.?;
 }
