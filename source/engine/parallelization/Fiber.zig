@@ -115,7 +115,7 @@ const PosixFiber = struct {
     parent: Handle,
 };
 
-fn posixTrampoline(arg_raw: usize) callconv(.C) void {
+fn posixTrampoline(arg_raw: usize) callconv(.c) void {
     const pf: *PosixFiber = @ptrFromInt(arg_raw);
     pf.start(pf.arg);
     switchTo(pf.parent);
