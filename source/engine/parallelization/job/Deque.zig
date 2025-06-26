@@ -17,11 +17,12 @@ comptime {
 }
 
 // These indices can wrap around. The actual number of items is `bottom - top`.
-top: std.atomic.Value(usize),
-bottom: std.atomic.Value(usize),
+top: std.atomic.Value(usize) align(std.atomic.cache_line),
+bottom: std.atomic.Value(usize) align(std.atomic.cache_line),
 
 /// The circular buffer storing job handles.
 buffer: [deque_capacity]Handle,
+hot_flags: [deque_capacity]u8,
 
 /// Initializes an empty deque.
 /// Both `top` and `bottom` start at 0.
@@ -30,6 +31,7 @@ pub fn init() Deque {
         .top = .init(0),
         .bottom = .init(0),
         .buffer = undefined,
+        .hot_flags = undefined,
     };
 }
 
@@ -44,7 +46,9 @@ pub fn pushBottom(self: *Deque, handle: Handle) void {
         @panic("job deque overflow");
     }
 
-    self.buffer[b & (deque_capacity - 1)] = handle;
+    const idx = b & (deque_capacity - 1);
+    self.buffer[idx] = handle;
+    @atomicStore(u8, &self.hot_flags[idx], 1, .release);
 
     self.bottom.store(b + 1, .release);
 }
@@ -66,7 +70,10 @@ pub fn popBottom(self: *Deque) ?Handle {
     b = new_b;
 
     if (t <= b) {
-        const handle = self.buffer[b & (deque_capacity - 1)];
+        const idx = b & (deque_capacity - 1);
+        const handle = self.buffer[idx];
+
+        @atomicStore(u8, &self.hot_flags[idx], 0, .monotonic);
 
         if (t == b) {
             if (self.top.cmpxchgStrong(t, t + 1, .acq_rel, .acquire) == null) {
@@ -90,9 +97,16 @@ pub fn steal(self: *Deque) ?Handle {
     const b = self.bottom.load(.acquire);
 
     if (t < b) {
-        const handle = self.buffer[t & (deque_capacity - 1)];
+        const idx = t & (deque_capacity - 1);
+
+        if (@atomicLoad(u8, &self.hot_flags[idx], .acquire) == 0) {
+            return null;
+        }
+
+        const handle = self.buffer[idx];
 
         if (self.top.cmpxchgStrong(t, t + 1, .seq_cst, .seq_cst) == null) {
+            @atomicStore(u8, &self.hot_flags[idx], 0, .monotonic);
             return handle;
         }
     }

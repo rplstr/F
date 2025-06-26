@@ -3,6 +3,7 @@ const Job = @import("job/Job.zig");
 const Handle = @import("job/Handle.zig");
 const Deque = @import("job/Deque.zig");
 const Worker = @import("job/Worker.zig");
+const Fiber = @import("Fiber.zig");
 const Semaphore = std.Thread.Semaphore;
 
 const JobSystem = @This();
@@ -18,14 +19,13 @@ allocator: std.mem.Allocator,
 workers: []Worker,
 semaphore: std.Thread.Semaphore,
 
-// The central pool of all job objects. By pre-allocating this, we avoid any
-// dynamic memory allocation during the main execution loop.
+/// The central pool of all job objects.
 job_pool: []Job,
 
 // A lock-free stack used as a free list to recycle job indices.
 // When a job is created, an index is popped. When it's finished, it's pushed back.
-free_job_indices: [max_jobs]u32,
-free_list_top: std.atomic.Value(u32),
+free_job_next: [max_jobs]u32,
+free_list_head: std.atomic.Value(u32),
 should_terminate: std.atomic.Value(bool),
 
 /// Creates worker threads, and prepares the job pool.
@@ -39,15 +39,16 @@ pub fn init(allocator: std.mem.Allocator) !*JobSystem {
         .workers = try allocator.alloc(Worker, num_threads),
         .semaphore = std.Thread.Semaphore{},
         .job_pool = try allocator.alloc(Job, max_jobs),
-        .free_job_indices = undefined,
-        .free_list_top = .init(0),
+        .free_job_next = undefined,
+        .free_list_head = .init(max_jobs),
         .should_terminate = .init(false),
     };
 
     for (0..max_jobs) |i| {
-        self.free_job_indices[i] = @intCast(i);
+        self.free_job_next[i] = @intCast(i + 1);
     }
-    self.free_list_top.store(max_jobs, .monotonic);
+    self.free_job_next[max_jobs - 1] = max_jobs;
+    self.free_list_head.store(0, .monotonic);
 
     for (0..num_threads) |i| {
         const worker_id = @as(u32, @intCast(i + 1));
@@ -55,8 +56,8 @@ pub fn init(allocator: std.mem.Allocator) !*JobSystem {
             .id = worker_id,
             .thread = undefined,
             .system = self,
+            .deque_high = .init(),
             .deque = .init(),
-            .rng = .init(@intCast(i)),
         };
 
         self.workers[i].thread = try .spawn(
@@ -113,29 +114,59 @@ pub fn run(self: *JobSystem, handle: Handle) void {
     self.semaphore.post();
 }
 
+/// Submits a high-priority job to be executed by the workers.
+pub fn runHigh(self: *JobSystem, handle: Handle) void {
+    const worker_id = worked_id;
+
+    if (worker_id == 0 or worker_id >= self.workers.len) {
+        self.executeJob(handle);
+        return;
+    }
+
+    const worker = &self.workers[worker_id];
+    worker.deque_high.pushBottom(handle);
+    self.semaphore.post();
+}
+
 /// Waits for a job and all of its children to complete.
 /// This is an active wait; the calling thread will execute other jobs while waiting.
 pub fn wait(self: *JobSystem, handle: Handle) void {
-    while (!self.isJobDone(handle)) {
-        const worker_id = worked_id;
-        if (worker_id == 0 or worker_id >= self.workers.len) {
+    if (self.isJobDone(handle)) return;
+
+    const current_fiber = Fiber.current();
+    const scheduler_fiber = Worker.scheduler;
+
+    // If running on non-job thread (main thread), fallback to busy-wait path.
+    if (current_fiber == null or current_fiber == scheduler_fiber) {
+        var spin_loops: u32 = 0;
+        const spin_threshold: u32 = 100;
+
+        while (!self.isJobDone(handle)) {
             std.Thread.yield() catch {};
-            continue;
+            if (spin_loops < spin_threshold) {
+                std.atomic.spinLoopHint();
+                spin_loops += 1;
+            }
         }
-
-        const worker = &self.workers[worker_id];
-
-        var maybe_job = worker.deque.popBottom();
-        if (maybe_job == null) {
-            maybe_job = worker.stealWork();
-        }
-
-        if (maybe_job) |job_to_do| {
-            self.executeJob(job_to_do);
-        } else {
-            std.Thread.yield() catch {};
-        }
+        return;
     }
+
+    // Running inside a job fibre – suspend.
+    const job = &self.job_pool[handle.index];
+
+    var node = self.allocator.create(WaiterNode) catch @panic("alloc waiter");
+    node.* = .{ .fiber = current_fiber, .next = null };
+
+    while (true) {
+        const head = job.waiters_head.load(.monotonic);
+        node.next = if (head) |h| @ptrCast(@alignCast(h)) else null;
+        if (job.waiters_head.cmpxchgStrong(head, node, .acq_rel, .monotonic) == null) break;
+    }
+
+    Fiber.switchTo(scheduler_fiber);
+
+    // resumed – job completed.
+    self.allocator.destroy(node);
 }
 
 /// Executes a single job.
@@ -152,15 +183,30 @@ pub fn executeJob(self: *JobSystem, handle: Handle) void {
 fn finishJob(self: *JobSystem, handle: Handle) void {
     const job = &self.job_pool[handle.index];
 
-    const previous = job.unfinished_jobs.fetchSub(1, .acq_rel);
-
-    if (previous == 1) {
-        if (!job.parent.isEqual(.invalid)) {
-            self.finishJob(job.parent);
-        }
-
-        self.freeJobIndex(handle.index);
+    const prev = job.unfinished_jobs.fetchSub(1, .acq_rel);
+    if (prev - 1 != 0) {
+        return;
     }
+
+    const head_ptr = job.waiters_head.swap(null, .acq_rel);
+    var node_ptr: ?*WaiterNode = if (head_ptr) |h| @ptrCast(@alignCast(h)) else null;
+    while (node_ptr) |n| {
+        if (Worker.current_worker) |w| {
+            w.enqueueFiber(n.fiber);
+        } else if (self.workers.len > 0) {
+            self.workers[0].enqueueFiber(n.fiber);
+            self.semaphore.post();
+        }
+        const next_ptr = n.next;
+        self.allocator.destroy(n);
+        node_ptr = next_ptr;
+    }
+
+    if (!job.parent.isEqual(.invalid)) {
+        self.finishJob(job.parent);
+    }
+
+    self.freeJobIndex(handle.index);
 }
 
 fn isJobDone(self: *JobSystem, handle: Handle) bool {
@@ -174,30 +220,30 @@ fn isJobDone(self: *JobSystem, handle: Handle) bool {
 }
 
 fn allocateJobIndex(self: *JobSystem) ?u32 {
-    var top = self.free_list_top.load(.monotonic);
-    while (top > 0) {
-        const new_top = top - 1;
-        if (self.free_list_top.cmpxchgStrong(top, new_top, .acq_rel, .monotonic) == null) {
-            const index = self.free_job_indices[new_top];
-
-            self.job_pool[index].generation +%= 1;
-            return index;
+    var head = self.free_list_head.load(.monotonic);
+    while (head != max_jobs) {
+        const next = self.free_job_next[head];
+        if (self.free_list_head.cmpxchgStrong(head, next, .acq_rel, .monotonic) == null) {
+            self.job_pool[head].generation +%= 1;
+            return head;
         }
-        top = self.free_list_top.load(.monotonic);
+        head = self.free_list_head.load(.monotonic);
     }
     return null;
 }
 
 fn freeJobIndex(self: *JobSystem, index: u32) void {
-    var top = self.free_list_top.load(.monotonic);
+    var head = self.free_list_head.load(.monotonic);
     while (true) {
-        self.free_job_indices[top] = index;
-        const new_top = top + 1;
-        if (self.free_list_top.cmpxchgStrong(top, new_top, .acq_rel, .monotonic) == null) {
+        if (head != max_jobs) {
+            self.free_job_next[index] = head;
+        } else {
+            self.free_job_next[index] = max_jobs;
+        }
+        if (self.free_list_head.cmpxchgStrong(head, index, .acq_rel, .monotonic) == null) {
             return;
         }
-
-        top = self.free_list_top.load(.monotonic);
+        head = self.free_list_head.load(.monotonic);
     }
 }
 
@@ -297,3 +343,8 @@ test "multiple children and waiting" {
 
     try testing.expectEqual(num_children, counter.load(.monotonic));
 }
+
+const WaiterNode = struct {
+    fiber: Fiber.Handle,
+    next: ?*WaiterNode,
+};

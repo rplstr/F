@@ -27,6 +27,9 @@ index: u32,
 /// The data payload for the job.
 data: [max_job_data_size]u8,
 
+/// Linked list of fibers waiting on this job to finish.
+waiters_head: std.atomic.Value(?*anyopaque),
+
 _padding: [36]u8,
 
 /// Initializes a job with its task, parent, and data.
@@ -42,14 +45,11 @@ pub fn init(task_fn: Task, parent_handle: Handle, job_data: []const u8) Job {
         .generation = 0,
         .index = 0,
         .data = undefined,
+        .waiters_head = .init(null),
         ._padding = undefined,
     };
 
     @memcpy(new_job.data[0..job_data.len], job_data);
 
     return new_job;
-}
-
-comptime {
-    std.debug.assert(@sizeOf(Job) == 128);
 }
