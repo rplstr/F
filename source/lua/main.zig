@@ -43,6 +43,9 @@ pub fn main() !void {
 
     var input_context = input.Context{};
 
+    var job_system = try engine.job.init(allocator);
+    defer job_system.deinit();
+
     const L = luajit.luaL_newstate();
     defer luajit.lua_close(L);
     luajit.luaL_openlibs(L);
@@ -56,6 +59,8 @@ pub fn main() !void {
     lua.interfaces.log.register(&registry, L.?, &log_context);
     lua.interfaces.input.register(&registry, L.?, &input_context);
     lua.interfaces.event.register(&registry, L.?);
+
+    lua.interfaces.job.Interface.register(&registry, L.?, job_system);
 
     try lua.registry.generate(&registry, allocator, "meta");
 
@@ -95,7 +100,7 @@ fn update(window: engine.Window.Handle, queue: *engine.event.Queue, input_contex
         }
     }
 
-    _ = luajit.lua_getglobal(L, "update");
+    _ = luajit.lua_getglobal(L, "Update");
     if (luajit.lua_isfunction(L, -1) != false) {
         err.protectedCall(L, 0, 0) catch {};
     } else {
