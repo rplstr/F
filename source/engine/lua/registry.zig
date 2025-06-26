@@ -243,6 +243,7 @@ fn writeFunctionDocumentation(writer: anytype, func: *const Function, fqn: []con
     }
 
     for (func.params) |p| {
+        if (std.mem.eql(u8, p.name, "self")) continue;
         try writer.print("---@param {s} {s}", .{ p.name, p.type_name });
         if (p.doc_string.len > 0) {
             try writer.print(" {s}\n", .{p.doc_string});
@@ -265,10 +266,11 @@ fn writeFunctionDocumentation(writer: anytype, func: *const Function, fqn: []con
     if (func.params.len > 0) {
         var fbs = std.io.fixedBufferStream(&param_names);
         const list_writer = fbs.writer();
-        for (func.params, 0..) |p, i| {
-            if (i > 0) {
-                try list_writer.writeAll(", ");
-            }
+        var first: bool = true;
+        for (func.params) |p| {
+            if (std.mem.eql(u8, p.name, "self")) continue;
+            if (!first) try list_writer.writeAll(", ");
+            first = false;
             try list_writer.writeAll(p.name);
         }
         param_list = fbs.getWritten();
