@@ -28,6 +28,7 @@ comptime {
 }
 
 const user32 = @import("user32.zig");
+const dwmapi = @import("dwmapi.zig");
 
 const class_name_w = std.unicode.utf8ToUtf16LeStringLiteral("Game");
 
@@ -106,6 +107,8 @@ pub fn open(config: OpenConfig) Error!Handle {
         null,
     );
     if (hwnd == null) return error.CreateWindowFailed;
+
+    setImmersiveDarkMode(hwnd.?);
 
     return hwnd.?;
 }
@@ -208,4 +211,27 @@ fn pushButton(queue: *event.Queue, btn: input.Button, x: i16, y: i16, is_down: b
 fn pushMove(queue: *event.Queue, x: i16, y: i16) void {
     const mov = input.MovePayload{ .x = x, .y = y };
     pushPayload(queue, input.MovePayload, .mouse_move, mov);
+}
+
+fn setImmersiveDarkMode(hwnd: user32.HWND) void {
+    const DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20: dwmapi.DWORD = 19; // 1809
+    const DWMWA_USE_IMMERSIVE_DARK_MODE: dwmapi.DWORD = 20; // 1903+
+
+    var enable: dwmapi.BOOL = 1; // TRUE
+
+    const hr_new = dwmapi.DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        &enable,
+        @sizeOf(dwmapi.BOOL),
+    );
+
+    if (hr_new != 0) {
+        _ = dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20,
+            &enable,
+            @sizeOf(dwmapi.BOOL),
+        );
+    }
 }

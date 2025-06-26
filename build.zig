@@ -19,6 +19,9 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) {
         engine.linkSystemLibrary("X11", .{});
     }
+    if (target.result.os.tag == .windows) {
+        engine.linkSystemLibrary("dwmapi", .{});
+    }
 
     const lua_api = b.addModule("runner", .{
         .root_source_file = b.path("source/lua/main.zig"),
