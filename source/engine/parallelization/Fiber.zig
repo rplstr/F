@@ -58,8 +58,9 @@ pub fn init(start: StartFn, arg: ?*anyopaque, stack_bytes: usize) !Handle {
         fib.ctx.uc_stack.ss_size = stack_bytes;
         fib.ctx.uc_link = null;
 
-        const tramp = @as(*const fn (usize) callconv(.c) void, @ptrCast(&posixTrampoline));
-        libc.makecontext(&fib.ctx, tramp, 1, @intFromPtr(fib));
+        trampoline_fiber = fib;
+        const tramp = @as(*const fn () callconv(.c) void, @ptrCast(&posixTrampoline));
+        libc.makecontext(&fib.ctx, tramp, 0);
         return @ptrCast(fib);
     }
 }
@@ -77,8 +78,8 @@ pub fn switchTo(to: Handle) void {
     } else {
         const prev = current_fiber;
         current_fiber = to;
-        const prev_f = @as(*PosixFiber, @ptrCast(prev.?));
-        const to_f = @as(*PosixFiber, @ptrCast(to.?));
+        const prev_f = @as(*PosixFiber, @ptrCast(@alignCast(prev.?)));
+        const to_f = @as(*PosixFiber, @ptrCast(@alignCast(to.?)));
         _ = libc.swapcontext(&prev_f.ctx, &to_f.ctx);
         // when swap returns we are back
         current_fiber = prev;
@@ -93,13 +94,14 @@ pub fn destroy(fiber: Handle) void {
         const kernel32 = @import("kernel32.zig");
         kernel32.DeleteFiber(fiber.?);
     } else {
-        const pf = @as(*PosixFiber, @ptrCast(fiber.?));
+        const pf = @as(*PosixFiber, @ptrCast(@alignCast(fiber.?)));
         std.heap.c_allocator.free(pf.stack);
         std.heap.c_allocator.destroy(pf);
     }
 }
 
 threadlocal var current_fiber: Handle = null;
+var trampoline_fiber: ?*PosixFiber = null;
 
 pub const Error = error{
     FiberConvertFailed,
@@ -115,8 +117,9 @@ const PosixFiber = struct {
     parent: Handle,
 };
 
-fn posixTrampoline(arg_raw: usize) callconv(.c) void {
-    const pf: *PosixFiber = @ptrFromInt(arg_raw);
+fn posixTrampoline() callconv(.c) void {
+    const pf = trampoline_fiber orelse unreachable;
+    trampoline_fiber = null; // Clear the global variable
     pf.start(pf.arg);
     switchTo(pf.parent);
     unreachable;
