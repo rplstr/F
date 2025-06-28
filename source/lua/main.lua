@@ -58,6 +58,6 @@ event.on({
     logger:info(string.format("entity %d (gen %d) %s component id 0x%x%08x", ent_idx, ent_gen, kind, ev.p3, ev.p2))
 end)
 
-function update()
+function Update()
     event.dispatch()
 end

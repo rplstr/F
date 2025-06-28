@@ -2,6 +2,7 @@
 //! This module does not provide Lua bindings, as it is not a reusable module.
 const builtin = @import("builtin");
 const event = @import("event.zig");
+const options = @import("options");
 
 /// Configuration options for opening a window.
 pub const OpenConfig = struct {
@@ -45,6 +46,8 @@ const native_os = builtin.os.tag;
 
 const Impl = if (native_os == .windows)
     @import("windows/win32.zig")
+else if (native_os == .linux and options.wayland)
+    @import("linux/wayland.zig")
 else if (native_os == .linux)
     @import("linux/x11.zig")
 else

@@ -195,4 +195,60 @@ pub const Translate = struct {
             else => .middle,
         };
     }
+
+    /// Linux evdev KEY_* code -> `Key`.
+    /// Covers printable ASCII letters, digits, arrows, space, escape and enter.
+    pub fn evdevToKey(code: u32) Key {
+        return switch (code) {
+            // Letters (evdev defines A=30..Z=53 with gaps)
+            30 => .a,
+            48 => .b,
+            46 => .c,
+            32 => .d,
+            18 => .e,
+            33 => .f,
+            34 => .g,
+            35 => .h,
+            23 => .i,
+            36 => .j,
+            37 => .k,
+            38 => .l,
+            50 => .m,
+            49 => .n,
+            24 => .o,
+            25 => .p,
+            16 => .q,
+            19 => .r,
+            31 => .s,
+            20 => .t,
+            22 => .u,
+            47 => .v,
+            17 => .w,
+            45 => .x,
+            21 => .y,
+            44 => .z,
+
+            // Numbers (row keys, not keypad)
+            2 => .num1,
+            3 => .num2,
+            4 => .num3,
+            5 => .num4,
+            6 => .num5,
+            7 => .num6,
+            8 => .num7,
+            9 => .num8,
+            10 => .num9,
+            11 => .num0,
+
+            // Other
+            57 => .space,
+            1 => .escape,
+            28 => .enter,
+            105 => .left,
+            106 => .right,
+            103 => .up,
+            108 => .down,
+            else => .unknown,
+        };
+    }
 };

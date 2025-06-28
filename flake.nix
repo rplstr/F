@@ -16,10 +16,15 @@
         buildInputs = [
           zig.packages.${system}."0.14.0"
           pkgs.xorg.libX11
+          pkgs.wayland
+          pkgs.wayland-scanner
+          pkgs.wayland-protocols
+          pkgs.pkg-config
         ];
 
         shellHook = ''
-          echo "done"
+          export WAYLAND_PROTOCOLS_DIR=${pkgs.wayland-protocols}/share/wayland-protocols
+          echo "WAYLAND_PROTOCOLS_DIR set to $WAYLAND_PROTOCOLS_DIR"
         '';
       };
     };
