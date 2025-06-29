@@ -4,6 +4,8 @@ const event = @import("../event.zig");
 const input = @import("../../input/input.zig");
 const posix = std.posix;
 
+const toPtr = @import("../../main.zig").toPtr;
+
 const log = std.log.scoped(.wayland);
 
 const OpenConfig = @import("../Window.zig").OpenConfig;
@@ -79,7 +81,7 @@ pub fn open(config: OpenConfig) Error!Handle {
 
     // Title.
     var title_buf: [256]u8 = undefined;
-    const title_c = try cString(&title_buf, config.title);
+    const title_c = toPtr(&title_buf, config.title) catch return Error.TitleTooLong;
     wl.xdg_toplevel_set_title(toplevel, title_c);
 
     // Handle window flags.
@@ -165,13 +167,6 @@ pub fn close(handle: Handle) Error!void {
     wl.xdg_surface_destroy(handle.xdg_surface);
     wl.wl_surface_destroy(handle.surface);
     wl.wl_display_disconnect(handle.display);
-}
-
-fn cString(buf: []u8, txt: []const u8) Error![*:0]const u8 {
-    if (txt.len >= buf.len) return Error.TitleTooLong;
-    std.mem.copyForwards(u8, buf[0..txt.len], txt);
-    buf[txt.len] = 0;
-    return buf[0..txt.len :0].ptr;
 }
 
 fn flush(display: *wl.wl_display) void {
