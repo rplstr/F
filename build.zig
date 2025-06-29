@@ -1,4 +1,5 @@
 const std = @import("std");
+const Shader = @import("Shader.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -9,13 +10,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const luajit_module = luajit_dep.module("luajit-build");
-
-    const engine = b.addModule("engine", .{
-        .root_source_file = b.path("source/engine/main.zig"),
-        .target = target,
-        .optimize = optimize,
+    const vulkan_headers = b.dependency("vulkan_headers", .{});
+    const vulkan = b.dependency("vulkan_zig", .{
+        .registry = vulkan_headers.path("registry/vk.xml"),
     });
+    const vulkan_module = vulkan.module("vulkan-zig");
+
+    const engine = b.addModule("engine", .{ .root_source_file = b.path("source/engine/main.zig"), .target = target, .optimize = optimize, .imports = {} });
     engine.addImport("luajit", luajit_module);
+    engine.addImport("vulkan", vulkan_module);
 
     const use_wayland = b.option(bool, "wayland", "Use Wayland backend on Linux") orelse false;
 
@@ -131,4 +134,12 @@ pub fn build(b: *std.Build) void {
     clean_step.dependOn(&rm_meta.step);
     clean_step.dependOn(&rm_zig_out.step);
     clean_step.dependOn(&rm_cache.step);
+
+    const shader_step = Shader.createStep(b, .{
+        .source_dir = "assets/shaders",
+        .output_dir = "assets/shaders",
+        .opt_flag = "-O",
+    });
+
+    lua_exe.step.dependOn(&shader_step.step);
 }

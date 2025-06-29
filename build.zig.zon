@@ -7,9 +7,18 @@
             .url = "git+https://github.com/rplstr/zig-luajit-build-fix#09ee61d684438bd51384515afb7dcf50e4e24209",
             .hash = "luajit_build-1.1.4-HFjoU10-AADjYUxCQhf7wKVETr8835DlzErGQlWfYo2P",
         },
+        .vulkan_zig = .{
+            .url = "git+https://github.com/Snektron/vulkan-zig#c66bddee009a8c4b71082ab7af723ed885161650",
+            .hash = "vulkan-0.0.0-r7YtxwZVAwDbCFXX5GpnS436SfBec9INY0zq-2OQ2BUp",
+        },
+        .vulkan_headers = .{
+            .url = "git+https://github.com/KhronosGroup/Vulkan-Headers#16cedde3564629c43808401ad1eb3ca6ef24709a",
+            .hash = "N-V-__8AAPEJ5gFnISva975wstyupNZ0L8Rz1eZof5HtaX1B",
+        },
     },
     .paths = .{
         "build.zig",
+        "Shader.zig",
         "source",
         "build.zig.zon",
     },
