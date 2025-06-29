@@ -20,11 +20,17 @@
           pkgs.wayland-scanner
           pkgs.wayland-protocols
           pkgs.pkg-config
+          pkgs.vulkan-loader
+          pkgs.vulkan-headers
+          pkgs.vulkan-validation-layers
+          pkgs.vulkan-tools
+          pkgs.shaderc
         ];
 
         shellHook = ''
           export WAYLAND_PROTOCOLS_DIR=${pkgs.wayland-protocols}/share/wayland-protocols
           echo "WAYLAND_PROTOCOLS_DIR set to $WAYLAND_PROTOCOLS_DIR"
+          echo "done"
         '';
       };
     };
