@@ -16,7 +16,11 @@ pub fn build(b: *std.Build) void {
     });
     const vulkan_module = vulkan.module("vulkan-zig");
 
-    const engine = b.addModule("engine", .{ .root_source_file = b.path("source/engine/main.zig"), .target = target, .optimize = optimize, .imports = {} });
+    const engine = b.addModule("engine", .{
+        .root_source_file = b.path("source/engine/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     engine.addImport("luajit", luajit_module);
     engine.addImport("vulkan", vulkan_module);
 
@@ -70,7 +74,6 @@ pub fn build(b: *std.Build) void {
         // Compile the generated C source and link it so that the interface
         // symbols (e.g. xdg_wm_base_interface) are provided to the linker.
         engine.addCSourceFile(.{ .file = b.path(xdg_code_rel) });
-        engine.addIncludePath(b.path(proto_dir_path));
         engine.addSystemIncludePath(b.path(proto_dir_path));
 
         const extra_dep = b.addSystemCommand(&.{"true"});
@@ -93,7 +96,7 @@ pub fn build(b: *std.Build) void {
                     else
                         b.path(inc_path);
 
-                    engine.addSystemIncludePath(lazy_inc);
+                    engine.addIncludePath(lazy_inc);
                 }
             }
         }
