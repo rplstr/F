@@ -1,10 +1,12 @@
 const std = @import("std");
-const Job = @import("job/Job.zig");
-const Handle = @import("job/Handle.zig");
-const Deque = @import("job/Deque.zig");
-const Worker = @import("job/Worker.zig");
-const Fiber = @import("Fiber.zig");
+
 const Semaphore = std.Thread.Semaphore;
+
+pub const Handle = @import("job/Handle.zig");
+pub const Deque = @import("job/Deque.zig");
+pub const Worker = @import("job/Worker.zig");
+pub const Fiber = @import("Fiber.zig");
+pub const Job = @import("job/Job.zig");
 
 const JobSystem = @This();
 
