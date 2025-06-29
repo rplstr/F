@@ -1,6 +1,8 @@
 const std = @import("std");
 const luajit = @import("luajit");
 const engine = @import("f");
+const vulkan = engine.vulkan;
+const Shader = vulkan.Shader;
 
 const lua = engine.lua;
 const err = lua.err;
@@ -45,6 +47,15 @@ pub fn main() !void {
 
     var job_system = try engine.job.init(allocator);
     defer job_system.deinit();
+
+    var loader = try vulkan.Loader.init();
+    defer loader.deinit();
+
+    const instance = try vulkan.Instance.create(loader, .{ .app = "FEngine" });
+    defer instance.destroy(loader);
+
+    const device = try vulkan.Device.create(&loader, instance, .{ .queue_priority = 1.0, .req = .{ .graphics = false } });
+    defer device.destroy(&loader, instance);
 
     const L = luajit.luaL_newstate();
     defer luajit.lua_close(L);
